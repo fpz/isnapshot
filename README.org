@@ -24,3 +24,8 @@ backup and a destination path:
 #+begin_src shell
 isnapshot SRC [SRC]... DEST
 #+end_src
+
+Example:
+#+begin_src shell
+isnapshot ~/my-documents ~/my-pictures ~/my-videos /mnt/backups/isnap
+#+end_src
