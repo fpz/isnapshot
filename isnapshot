@@ -1,0 +1,308 @@
+#!/bin/sh
+
+VERSION=15.04.1
+ISNAP=$(basename $0)
+ISNAP_DATE=$(date "+%Y%m%d.%H%M%S")
+
+# Function to display usage
+show_usage()
+{
+    cat << EOF 1>&2
+$ISNAP version $VERSION
+Copyright (C) 2015 by Francesco Pizzolante
+
+$ISNAP comes with ABSOLUTELY NO WARRANTY.  This is free software, and you are
+welcome to redistribute it under certain conditions.  See the GNU General Public
+Licence for details.
+
+$ISNAP creates incremental snapshots while providing the view of full snapshots.
+It uses rsync and the hardlinks mechanism in order to avoid duplicating data at
+the snapshot destination.  Thanks to $ISNAP, you get fast, compact, incremental
+and dated snapshots.
+
+$ISNAP provides a very simple command line script to backup folders. It is
+designed to run on lightweight shells such as 'ash' that comes with BusyBox and
+running on several NAS.
+
+$ISNAP is based on Michael Jakl's idea (see
+https://blog.interlinked.org/tutorials/rsync_time_machine.html).
+
+Usage: $ISNAP [OPTION]... SRC [SRC]... DEST
+  or   $ISNAP [OPTION]... SRC [SRC]... [USER@]HOST:DEST
+
+Options
+ -h, --help         show this help
+ -d, --daily        override number of daily snapshots to keep (default is 31)
+ -e, --extra        override number of extra snapshots to keep (default is 0=all)
+ -H, --hourly       override number of hourly snapshots to keep (default is 24)
+ -m, --monthly      override number of monthly snapshots to keep (default is 12)
+ -y, --yearly       override number of yearly snapshots to keep (default is 0=all)
+
+Report $ISNAP bugs to isnapshot@pizzolante.be
+EOF
+}
+
+# Function to display help
+show_help()
+{
+    cat << EOF 1>&2
+Try '$ISNAP -h' for more information.
+EOF
+}
+
+# Main constants and names
+ISNAP_YEAR=$(echo $ISNAP_DATE | cut -c1-4)
+ISNAP_MONTH=$(echo $ISNAP_DATE | cut -c1-6)
+ISNAP_DAY=$(echo $ISNAP_DATE | cut -c1-8)
+ISNAP_HOUR=$(echo $ISNAP_DATE | cut -c1-11)
+
+ISNAP_ALL=all
+ISNAP_LATEST=latest
+ISNAP_SETS=sets
+ISNAP_TMP=tmp
+
+ISNAP_SET_YEARLY=yearly
+ISNAP_SET_MONTHLY=monthly
+ISNAP_SET_DAILY=daily
+ISNAP_SET_HOURLY=hourly
+ISNAP_SET_EXTRA=extra
+
+ISNAP_KEEP_YEARLY=0
+ISNAP_KEEP_MONTHLY=12
+ISNAP_KEEP_DAILY=31
+ISNAP_KEEP_HOURLY=24
+ISNAP_KEEP_EXTRA=0
+
+ISNAP_NAME_PREFIX=snap.
+ISNAP_NAME=$ISNAP_NAME_PREFIX$ISNAP_DATE
+
+# Function to display number of snapshots
+display_snaphot_count()
+{
+    COUNT=$1
+    if [ "$COUNT" == "0" ]
+    then TEXT="no snapshot"
+    elif [ "$COUNT" == "1" ]
+    then TEXT="1 snapshot"
+    else TEXT="$COUNT snapshots"
+    fi
+    echo $TEXT
+}
+
+# Function to display number of snapshots to keep
+display_snaphosts_to_keep()
+{
+    KEEP=$1
+    if [ "$KEEP" == "0" ]
+    then TEXT="all snapshots"
+    elif  [ "$KEEP" == "1" ]
+    then TEXT="1 snapshot"
+    else TEXT="$KEEP snapshots"
+    fi
+    echo $TEXT
+}
+
+# Function to count number of snapshots in given set
+count_snapshots()
+{
+    COUNT_PATH=$1
+    SEARCH_PREFIX=$2
+    SNAP_COUNT=$($SSH /bin/sh << EOF
+find $COUNT_PATH -type d -name "$SEARCH_PREFIX*" | wc -l
+EOF
+              )
+    echo $SNAP_COUNT
+}
+
+# Function to count number of snapshots in current set
+count_current_set_snapshots()
+{
+    count_snapshots $ISNAP_PATH_SET $ISNAP_NAME_PREFIX
+}
+
+# Function to determine current snapshot set
+current_snapshot_set()
+{
+    COUNT=$(count_snapshots $ISNAP_PATH_SET_YEARLY $ISNAP_NAME_PREFIX$ISNAP_YEAR)
+    if [ "$COUNT" -eq 0 ]
+    then echo $ISNAP_SET_YEARLY
+         return 0
+    fi
+
+    COUNT=$(count_snapshots $ISNAP_PATH_SET_MONTHLY $ISNAP_NAME_PREFIX$ISNAP_MONTH)
+    if [ "$COUNT" -eq 0 ]
+    then echo $ISNAP_SET_MONTHLY
+         return 0
+    fi
+
+    COUNT=$(count_snapshots $ISNAP_PATH_SET_DAILY $ISNAP_NAME_PREFIX$ISNAP_DAY)
+    if [ "$COUNT" -eq 0 ]
+    then echo $ISNAP_SET_DAILY
+         return 0
+    fi
+
+    COUNT=$(count_snapshots $ISNAP_PATH_SET_HOURLY $ISNAP_NAME_PREFIX$ISNAP_HOUR)
+    if [ "$COUNT" -eq 0 ]
+    then echo $ISNAP_SET_HOURLY
+         return 0
+    fi
+
+    echo $ISNAP_SET_EXTRA
+}
+
+# Determine default keep settings for a given set
+snapshot_set_keep()
+{
+    SET=$1
+    case "$SET" in
+        "$ISNAP_SET_YEARLY"  ) KEEP=$ISNAP_KEEP_YEARLY ;;
+        "$ISNAP_SET_MONTHLY" ) KEEP=$ISNAP_KEEP_MONTHLY ;;
+        "$ISNAP_SET_DAILY"   ) KEEP=$ISNAP_KEEP_DAILY ;;
+        "$ISNAP_SET_HOURLY"  ) KEEP=$ISNAP_KEEP_HOURLY ;;
+        "$ISNAP_SET_EXTRA"   ) KEEP=$ISNAP_KEEP_EXTRA ;;
+        * ) KEEP=0 ;;
+    esac
+    echo $KEEP
+}
+
+# Parse parameters
+while [ "$#" -gt 0 ]; do
+    case $1 in
+        -d | --daily )    shift
+                          ISNAP_KEEP_DAILY=$1
+                          ;;
+        -e | --extra )    shift
+                          ISNAP_KEEP_EXTRA==$1
+                          ;;
+        -h | --help )     show_usage
+                          exit
+                          ;;
+        -H | --hourly )   shift
+                          ISNAP_KEEP_HOURLY=$1
+                          ;;
+        -m | --monthly )  shift
+                          ISNAP_KEEP_MONTHLY=$1
+                          ;;
+        -y | --yearly )   shift
+                          ISNAP_KEEP_YEARLY=$1
+                          ;;
+        -* )              echo "$ISNAP: unknown option $1"
+                          show_help
+                          exit
+                          ;;
+        * )               if [ "$#" -gt 1 ]
+                          then ISNAP_SOURCES="$ISNAP_SOURCES $1"
+                          else ISNAP_DEST=$1
+                          fi
+    esac
+    shift
+done
+
+# Check that we have at least the 2 required arguments : sources and dest
+if [ "$ISNAP_SOURCES" == "" ] || [ "$ISNAP_DEST" == "" ]
+then echo "Illegal number of parameters. Please provide at least one source path and one destination path.";
+     show_help;
+     exit 1
+fi
+
+# Split 'user@host:destination' into 'user@host' and 'destination', if required
+if [[ $ISNAP_DEST == *":"* ]]
+then
+    ISNAP_AUTH_INFO=$(echo $ISNAP_DEST | cut -d':' -f1)
+    ISNAP_PATH_DEST=$(echo $ISNAP_DEST | cut -d':' -f2)
+    SSH="ssh "$ISNAP_AUTH_INFO
+else
+    ISNAP_PATH_DEST=$ISNAP_DEST
+    SSH=
+fi
+
+# Destination folders
+ISNAP_PATH_ALL=$ISNAP_PATH_DEST/$ISNAP_ALL
+ISNAP_PATH_LATEST=$ISNAP_PATH_DEST/$ISNAP_LATEST
+ISNAP_PATH_SETS=$ISNAP_PATH_DEST/$ISNAP_SETS
+ISNAP_PATH_TMP=$ISNAP_PATH_DEST/$ISNAP_TMP
+ISNAP_PATH_SET_YEARLY=$ISNAP_PATH_SETS/$ISNAP_SET_YEARLY
+ISNAP_PATH_SET_MONTHLY=$ISNAP_PATH_SETS/$ISNAP_SET_MONTHLY
+ISNAP_PATH_SET_DAILY=$ISNAP_PATH_SETS/$ISNAP_SET_DAILY
+ISNAP_PATH_SET_HOURLY=$ISNAP_PATH_SETS/$ISNAP_SET_HOURLY
+ISNAP_PATH_SET_EXTRA=$ISNAP_PATH_SETS/$ISNAP_SET_EXTRA
+ISNAP_LATEST_REL_TO_TMP=../../$ISNAP_LATEST
+
+# Start processing
+echo "This is $ISNAP version $VERSION."
+echo "Sources to snap: "$ISNAP_SOURCES
+echo "Snapshot destination: "$ISNAP_DEST
+
+# Ensure that required directories exist at destination
+$SSH mkdir -p $ISNAP_PATH_ALL $ISNAP_PATH_SET_YEARLY $ISNAP_PATH_SET_MONTHLY $ISNAP_PATH_SET_DAILY $ISNAP_PATH_SET_HOURLY $ISNAP_PATH_SET_EXTRA $ISNAP_PATH_TMP
+
+# Determine current snapshot set
+ISNAP_SET=$(current_snapshot_set)
+ISNAP_KEEP=$(snapshot_set_keep $ISNAP_SET)
+ISNAP_PATH_SET=$ISNAP_PATH_SETS/$ISNAP_SET
+
+echo "Starting snapshot '$ISNAP_NAME' in '$ISNAP_SET' set (keep $(display_snaphosts_to_keep $ISNAP_KEEP))."
+echo "Snapshot full path: "$ISNAP_PATH_SET/$ISNAP_NAME
+
+# Count initial backups in set
+ISNAP_COUNT_START=$(count_current_set_snapshots)
+echo "Found $(display_snaphot_count $ISNAP_COUNT_START) in '$ISNAP_SET' set."
+
+echo ""
+echo "Starting rsync process..."
+$SSH mkdir -p $ISNAP_PATH_TMP/$ISNAP_NAME \
+    && rsync --archive \
+             --delete \
+             --delete-excluded \
+             --compress \
+             --human-readable \
+             --progress \
+             --link-dest=$ISNAP_LATEST_REL_TO_TMP \
+             $ISNAP_SOURCES $ISNAP_DEST/$ISNAP_TMP/$ISNAP_NAME \
+    && $SSH mv $ISNAP_PATH_TMP/$ISNAP_NAME $ISNAP_PATH_SET/$ISNAP_NAME \
+    && $SSH rm -f $ISNAP_PATH_LATEST \
+    && $SSH ln -s $ISNAP_SETS/$ISNAP_SET/$ISNAP_NAME $ISNAP_PATH_LATEST \
+    && $SSH ln -s ../$ISNAP_SETS/$ISNAP_SET/$ISNAP_NAME $ISNAP_PATH_ALL/$ISNAP_NAME
+
+echo "rsync process finished."
+echo ""
+
+# Cleaning up
+echo "Starting clean up..."
+
+# Delete older backups if requested
+if [ "$ISNAP_KEEP" -gt 0 ]
+then
+    ISNAP_COUNT=$(count_current_set_snapshots)
+    if [ "$ISNAP_COUNT" -gt "$ISNAP_KEEP" ]
+    then
+        ISNAP_COUNT_DELETE=$(($ISNAP_COUNT-$ISNAP_KEEP))
+        ISNAP_CLEANUP_DIRS=$($SSH /bin/sh << EOF
+find $ISNAP_PATH_SET -type d -name $ISNAP_NAME_PREFIX* | sort | head -n $ISNAP_COUNT_DELETE
+EOF
+                          )
+        for CLEANUP_DIR in $ISNAP_CLEANUP_DIRS; do
+            $SSH rm -rf $CLEANUP_DIR
+        done
+    fi
+fi
+
+# Cleanup symbolic links from 'all' folder
+$SSH find $ISNAP_PATH_ALL -type l -follow -delete
+
+# Delete any empty folder (tmp) and any empty set
+$SSH /bin/sh << EOF
+#echo rmdir $ISNAP_PATH_SETS/*
+rmdir $ISNAP_PATH_SETS/* 2>/dev/null
+#echo rmdir $ISNAP_PATH_DEST/*
+rmdir $ISNAP_PATH_DEST/* 2>/dev/null
+# which find
+# find $ISNAP_PATH_SETS -type d -empty -delete
+# find $ISNAP_PATH_DEST -type d -empty -delete
+EOF
+echo "clean up finished."
+echo ""
+
+# Count remaining backups in set
+ISNAP_COUNT_END=$(count_current_set_snapshots)
+echo "Leaving $(display_snaphot_count $ISNAP_COUNT_END) in '$ISNAP_SET' set."
