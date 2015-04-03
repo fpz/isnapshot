@@ -5,14 +5,13 @@
 
 * Description
 
-isnapshot creates incremental snapshots while providing the view of full snapshots.
-It uses rsync and the hardlinks mechanism in order to avoid duplicating data at
-the snapshot destination.  Thanks to isnapshot, you get fast, compact, incremental
-and dated snapshots.
+*isnapshot* creates incremental snapshots while providing the view of full
+snapshots.  It uses /rsync/ and the /hardlinks/ mechanism in order to avoid
+duplicating data at the snapshot destination.  Thanks to *isnapshot*, you get
+fast, compact, incremental and dated snapshots.
 
-isnapshot provides a very simple command line script to backup folders. It is
-designed to run on lightweight shells such as 'ash' that comes with BusyBox and
-running on several NAS.
+*isnapshot* provides a very simple command line script to backup folders. It is
+designed to run on lightweight shells such as /ash/ that comes with /BusyBox/ which
+runs on several NAS.
 
-isnapshot is based on Michael Jakl's idea (see
-https://blog.interlinked.org/tutorials/rsync_time_machine.html).
+*isnapshot* is based on [[https://blog.interlinked.org/tutorials/rsync_time_machine.html][Michael Jakl's idea]].
