@@ -15,3 +15,12 @@ designed to run on lightweight shells such as /ash/ that comes with /BusyBox/ wh
 runs on several NAS.
 
 *isnapshot* is based on [[https://blog.interlinked.org/tutorials/rsync_time_machine.html][Michael Jakl's idea]].
+
+* Usage
+
+Using *isnapshot* is very easy. Simply run it with source folders that you want to
+backup and a destination path:
+
+#+begin_src shell
+isnapshot SRC [SRC]... DEST
+#+end_src
